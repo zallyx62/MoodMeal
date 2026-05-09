@@ -143,10 +143,9 @@ export default function MoodMeal() {
     const prefsDesc  = preferences.map(p=>PREFS.find(pr=>pr.id===p)?.label||p).join(", ")||"aucune";
     const cuisineObj = CUISINES.find(c=>c.id===cuisine);
     const budgetObj  = BUDGETS.find(b=>b.id===budget);
-    const modeDesc   = mode==="solo"?"Solo":mode==="duo"?"Duo":"Famille ("+totalMembers+" personnes)";
 
     const prompt = `Tu es un chef cuisinier passionné. Génère une recette adaptée:
-Mode: ${modeDesc}
+Mode: ${mode==="solo"?"Solo":mode==="duo"?"Duo":Famille (${totalMembers} personnes)}
 Humeurs: ${moodsDesc}
 Ingrédients: ${ingDesc}
 Temps: ${selectedTime} minutes

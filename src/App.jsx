@@ -70,7 +70,7 @@ function getMemberLabel(mode, i) {
 function randomChoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 export default function MoodMeal() {
-  const [theme, setTheme]   = useState("light");
+  const [theme, setTheme]   = useState(()=>{ try{ return localStorage.getItem("moodmeal_theme")||"light"; }catch(e){ return "light"; } });
   const [step, setStep]     = useState(0);
   const [mode, setMode]     = useState(null);
   const [memberCount, setMemberCount] = useState(4);
@@ -121,7 +121,7 @@ export default function MoodMeal() {
       "","📋 INGRÉDIENTS",
       ...(recipe.ingredients||[]).map(i=>`  • ${i.amount}  ${i.name}`),
       "","👨‍🍳 ÉTAPES",
-      ...(recipe.steps||[]).map(s=>`${s.num||""}. ${s.title}\n   ${s.detail}${s.tip?`\n   💡 ${s.tip}`:""}`),
+      ...(recipe.steps||[]).map(s=>[(s.num||"")+". "+s.title, "   "+s.detail, s.tip?"   💡 "+s.tip:null].filter(Boolean).join("\n")),
       "",recipe.chefTip?`🎯 ${recipe.chefTip}`:"",
       recipe.winePairing?`🍷 ${recipe.winePairing}`:"",
       "","— Généré par MoodMeal 🍽️",
@@ -129,51 +129,69 @@ export default function MoodMeal() {
     navigator.clipboard.writeText(text).then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2500); });
   },[recipe]);
 
-  const generateRecipe = useCallback(async (overIngredients, overMoods) => {
+  // generateRecipe accepte tous les params explicitement pour eviter les problemes de closure/state async
+  const generateRecipe = useCallback(async (params = {}) => {
     if (loading) return;
     setLoading(true); setError(null);
-    const usedMoods = overMoods || memberMoods;
-    const moodsDesc = Array.from({length:totalMembers},(_,i)=>{
-      const m = MOODS.find(m=>m.id===usedMoods[i]);
-      return `${getMemberLabel(mode,i)}: ${m?.label||"neutre"}`;
+
+    const resolvedMode    = params.mode    !== undefined ? params.mode    : mode;
+    const resolvedTotal   = params.total   !== undefined ? params.total   : totalMembers;
+    const resolvedMoods   = params.moods   !== undefined ? params.moods   : memberMoods;
+    const resolvedIngs    = params.ings    !== undefined ? params.ings    : selectedIngredients;
+    const resolvedTime    = params.time    !== undefined ? params.time    : selectedTime;
+    const resolvedCuisine = params.cuisine !== undefined ? params.cuisine : cuisine;
+    const resolvedBudget  = params.budget  !== undefined ? params.budget  : budget;
+    const resolvedPrefs   = params.prefs   !== undefined ? params.prefs   : preferences;
+    const resolvedShop    = params.shop    !== undefined ? params.shop    : useShoppingList;
+    const resolvedShopTxt = params.shopTxt !== undefined ? params.shopTxt : shoppingListText;
+
+    const moodsDesc = Array.from({length:resolvedTotal},(_,i)=>{
+      const m = MOODS.find(m=>m.id===resolvedMoods[i]);
+      return getMemberLabel(resolvedMode,i)+": "+(m ? m.label : "neutre");
     }).join(" | ");
-    const ingDesc = useShoppingList
-      ? (shoppingListText.trim()||"ingrédients de base")
-      : ((overIngredients||selectedIngredients).length>0 ? (overIngredients||selectedIngredients).join(", ") : "ingrédients de base du placard");
-    const prefsDesc  = preferences.map(p=>PREFS.find(pr=>pr.id===p)?.label||p).join(", ")||"aucune";
-    const cuisineObj = CUISINES.find(c=>c.id===cuisine);
-    const budgetObj  = BUDGETS.find(b=>b.id===budget);
 
-    const prompt = `Tu es un chef cuisinier passionné. Génère une recette adaptée:
-Mode: ${mode==="solo"?"Solo":mode==="duo"?"Duo":Famille (${totalMembers} personnes)}
-Humeurs: ${moodsDesc}
-Ingrédients: ${ingDesc}
-Temps: ${selectedTime} minutes
-Préférences: ${prefsDesc}
-Cuisine: ${cuisineObj?.label} (${cuisineObj?.desc})
-Budget: ${budgetObj?.label} (${budgetObj?.desc})
+    const ingDesc = resolvedShop
+      ? (resolvedShopTxt.trim()||"ingredients de base")
+      : (resolvedIngs.length>0 ? resolvedIngs.join(", ") : "ingredients de base du placard");
 
-Réponds UNIQUEMENT avec du JSON brut valide (sans markdown):
-{"name":"Nom créatif","emoji":"emoji","tagline":"phrase courte poétique","moodMatch":"pourquoi correspond aux humeurs (15 mots max)","cuisineType":"cuisine réelle","difficulty":"Facile ou Moyen ou Avancé","prepTime":"X min","cookTime":"X min","servings":${totalMembers},"calories":"~XXX kcal/pers","estimatedCost":"~X€/pers","ingredients":[{"amount":"200g","name":"ingrédient"}],"steps":[{"num":1,"title":"Titre","detail":"Instruction","tip":"astuce ou null"}],"chefTip":"conseil","winePairing":"accord ou boisson","moodColor":"#hex"}`;
+    const prefsDesc  = resolvedPrefs.map(p=>PREFS.find(pr=>pr.id===p)?.label||p).join(", ")||"aucune";
+    const cuisineObj = CUISINES.find(c=>c.id===resolvedCuisine);
+    const budgetObj  = BUDGETS.find(b=>b.id===resolvedBudget);
+    const modeLabel  = resolvedMode==="solo"?"Solo":resolvedMode==="duo"?"Duo":"Famille ("+resolvedTotal+" personnes)";
+
+    const prompt = "Tu es un chef cuisinier passionne. Genere une recette adaptee:\n"
+      +"Mode: "+modeLabel+"\n"
+      +"Humeurs: "+moodsDesc+"\n"
+      +"Ingredients: "+ingDesc+"\n"
+      +"Temps: "+resolvedTime+" minutes\n"
+      +"Preferences: "+prefsDesc+"\n"
+      +"Cuisine: "+(cuisineObj?.label||"Au choix")+" ("+(cuisineObj?.desc||"")+")"+"\n"
+      +"Budget: "+(budgetObj?.label||"Normal")+" ("+(budgetObj?.desc||"")+")"+"\n\n"
+      +"Reponds UNIQUEMENT avec du JSON brut valide (sans markdown, sans backticks):\n"
+      +'{"name":"Nom creatif","emoji":"emoji","tagline":"phrase courte poetique","moodMatch":"pourquoi correspond aux humeurs (15 mots max)","cuisineType":"cuisine reelle","difficulty":"Facile","prepTime":"X min","cookTime":"X min","servings":'+resolvedTotal+',"calories":"~XXX kcal/pers","estimatedCost":"~X EUR/pers","ingredients":[{"amount":"200g","name":"ingredient"}],"steps":[{"num":1,"title":"Titre","detail":"Instruction","tip":"astuce ou null"}],"chefTip":"conseil","winePairing":"accord ou boisson","moodColor":"#hex"}';
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages",{
+      const res = await fetch("/api/generate",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ model:"claude-sonnet-4-20250514",max_tokens:2000,messages:[{role:"user",content:prompt}] }),
+        body:JSON.stringify({ prompt }),
       });
-      if (!res.ok) { const e=await res.json().catch(()=>{}); throw new Error(e?.error?.message||`HTTP ${res.status}`); }
+      if (!res.ok) {
+        let errMsg = "HTTP "+res.status;
+        try { const e=await res.json(); errMsg=e?.error?.message||errMsg; } catch(_){}
+        throw new Error(errMsg);
+      }
       const data = await res.json();
       const raw  = (data.content||[]).map(c=>c.text||"").join("");
-      const clean= raw.replace(/```json\s*/gi,"").replace(/```\s*/g,"").trim();
+      const clean= raw.replace(/```json/gi,"").replace(/```/g,"").trim();
       const s=clean.indexOf("{"), e2=clean.lastIndexOf("}");
-      if(s===-1||e2===-1) throw new Error("Réponse invalide.");
+      if(s===-1||e2===-1) throw new Error("JSON introuvable dans la reponse.");
       const parsed = JSON.parse(clean.slice(s,e2+1));
       setRecipe(parsed);
       setHistory(prev=>[{...parsed,_time:new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})},...prev].slice(0,10));
       setStep(4);
     } catch(err) {
-      setError("Erreur lors de la génération. Vérifiez votre connexion et réessayez.");
+      setError("Erreur : "+(err.message||"inconnue")+" — Reessayez.");
     } finally { setLoading(false); }
   },[loading,totalMembers,memberMoods,mode,useShoppingList,shoppingListText,selectedIngredients,preferences,cuisine,budget,selectedTime]);
 
@@ -184,11 +202,16 @@ Réponds UNIQUEMENT avec du JSON brut valide (sans markdown):
     const moods={}; for(let i=0;i<tot;i++) moods[i]=randomChoice(MOODS).id;
     const ings = CATEGORIES.flatMap(c=>c.items).sort(()=>Math.random()-0.5).slice(0,Math.floor(Math.random()*6)+4);
     setMode(m); setMemberCount(cnt); setMemberMoods(moods);
-    setSelectedIngredients(ings); setSelectedTime(randomChoice(TIMES).id);
-    setCuisine(randomChoice(CUISINES.filter(c=>c.id!=="any")).id);
-    setBudget(randomChoice(BUDGETS).id); setPreferences([]); setUseShoppingList(false); setShoppingListText("");
-    setTimeout(()=>generateRecipe(ings,moods),50);
+    setSelectedIngredients(ings); setPreferences([]); setUseShoppingList(false); setShoppingListText("");
+    const randTime    = randomChoice(TIMES).id;
+    const randCuisine = randomChoice(CUISINES.filter(c=>c.id!=="any")).id;
+    const randBudget  = randomChoice(BUDGETS).id;
+    setSelectedTime(randTime);
+    setCuisine(randCuisine);
+    setBudget(randBudget);
     setStep(4);
+    // Pass all values explicitly so generateRecipe doesn't rely on async state
+    generateRecipe({ mode:m, total:tot, moods, ings, time:randTime, cuisine:randCuisine, budget:randBudget, prefs:[], shop:false, shopTxt:"" });
   };
 
   // ── Sub-components ────────────────────────────────────────────────────
@@ -204,7 +227,7 @@ Réponds UNIQUEMENT avec du JSON brut valide (sans markdown):
           </button>
         )}
         {Object.entries(THEMES).map(([k,v])=>(
-          <button key={k} onClick={()=>setTheme(k)} style={{...chip(theme===k),borderRadius:"10px",padding:"6px 12px",fontSize:"12px"}}>
+          <button key={k} onClick={()=>{setTheme(k);try{localStorage.setItem("moodmeal_theme",k);}catch(e){}}} style={{...chip(theme===k),borderRadius:"10px",padding:"6px 12px",fontSize:"12px"}}>
             {v.icon} {v.name}
           </button>
         ))}
@@ -491,7 +514,7 @@ Réponds UNIQUEMENT avec du JSON brut valide (sans markdown):
 
         <div style={{display:"flex",gap:"10px"}}>
           <button onClick={()=>setStep(2)} style={sec({flex:"0 0 auto"})}>← Retour</button>
-          <button onClick={()=>generateRecipe()} disabled={loading} style={btn(loading||!selectedTime,{flex:1})}>
+          <button onClick={()=>generateRecipe({})} disabled={loading} style={btn(loading||!selectedTime,{flex:1})}>
             {loading
               ?<span style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"8px"}}><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⏳</span>Génération...</span>
               :"🍳 Générer ma recette !"}
@@ -524,7 +547,7 @@ Réponds UNIQUEMENT avec du JSON brut valide (sans markdown):
           <h2 style={{fontSize:"22px",fontWeight:"800",marginBottom:"12px"}}>Oups !</h2>
           <p style={{color:t.subtext,marginBottom:"28px"}}>{error}</p>
           <div style={{display:"flex",gap:"10px",justifyContent:"center"}}>
-            <button onClick={()=>generateRecipe()} style={btn(false,{padding:"14px 28px"})}>🔄 Réessayer</button>
+            <button onClick={()=>generateRecipe({})} style={btn(false,{padding:"14px 28px"})}>🔄 Réessayer</button>
             <button onClick={()=>setStep(3)} style={sec()}>← Options</button>
           </div>
         </div>
@@ -623,7 +646,7 @@ Réponds UNIQUEMENT avec du JSON brut valide (sans markdown):
               style={{...sec({flex:"1 1 140px",background:copied?t.successBg:t.chip,borderColor:copied?t.success:t.border,color:copied?t.success:t.text,fontWeight:"700"})}}>
               {copied?"✅ Copié !":"📋 Copier"}
             </button>
-            <button onClick={()=>{setRecipe(null);setError(null);generateRecipe();}} style={sec({flex:"1 1 120px"})}>🔄 Autre recette</button>
+            <button onClick={()=>{setRecipe(null);setError(null);generateRecipe({});}} style={sec({flex:"1 1 120px"})}>🔄 Autre recette</button>
             <button onClick={fullReset} style={btn(false,{flex:"1 1 120px"})}>🏠 Accueil</button>
           </div>
         </div>
